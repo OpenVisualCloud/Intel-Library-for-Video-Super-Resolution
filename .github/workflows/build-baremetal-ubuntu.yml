@@ -74,21 +74,27 @@ jobs:
         sudo apt-get update --fix-missing && \
         sudo apt-get install --no-install-recommends -y intel-oneapi-ipp-devel-2022.0
 
-    - name: 'Download and patch ffmpeg repository'
+    - name: 'preparation: download and patch ffmpeg repository'
       run: |
         set -eo pipefail && \
         curl -Lf https://github.com/ffmpeg/ffmpeg/archive/${FFMPEG_COMMIT_ID}.tar.gz | tar -zx --strip-components=1 -C "${BUILD_FFMPEG_DIR}"
         patch -d "${BUILD_FFMPEG_DIR}" -p1 -i <(cat "${{ github.workspace }}/ffmpeg/"*.patch)
         cp "${{ github.workspace }}/ffmpeg/vf_raisr"*.c "${BUILD_FFMPEG_DIR}/libavfilter"
 
-    - name: 'Build RAISR from source code'
+    - name: 'build: building RAISR from source code'
       run: |
         ./build.sh -DENABLE_RAISR_OPENCL=ON \
           -DCMAKE_LIBRARY_PATH="/opt/intel/oneapi/ipp/latest/lib;${PREFIX}/lib;" \
           -DCMAKE_C_FLAGS="-I/opt/intel/oneapi/ipp/latest/include -I/opt/intel/oneapi/ipp/latest/include/ipp" \
           -DCMAKE_CXX_FLAGS="-I/opt/intel/oneapi/ipp/latest/include -I/opt/intel/oneapi/ipp/latest/include/ipp"
 
-    - name: 'Configure ffmpeg repository'
+    - name: 'post-build: upload build artifacts'
+      uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+      with:
+        name: raisr-library-binary
+        path: '${{ github.workspace }}/build/Library'
+
+    - name: 'preparation: configure ffmpeg repository'
       continue-on-error: true
       run: |
         cd "${BUILD_FFMPEG_DIR}"
@@ -109,12 +115,54 @@ jobs:
           --prefix="${PREFIX}" || \
         { tail -n 100 "${BUILD_DIR}/ffmpeg/ffbuild/config.log" && exit 1; }
 
-    - name: 'Build, install and check ffmpeg'
+    - name: 'build: compilation and install of ffmpeg'
       continue-on-error: true
+      working-directory: "${BUILD_FFMPEG_DIR}"
       run: |
-        cd "${BUILD_FFMPEG_DIR}"
         make clean
         make -j"$(nproc)"
         sudo -E make install
+
+    - name: 'checks: check if ffmpeg was build properly'
+      continue-on-error: true
+      working-directory: "${BUILD_FFMPEG_DIR}"
+      run: |
         sudo -E ldconfig
-        ffmpeg -buildconf
+        ./ffmpeg -buildconf || \
+        ffmpeg -buildconf   || \
+        /usr/local/bin/ffmpeg -buildconf
+
+  build-baremetal-using-scripts:
+    runs-on: 'ubuntu-22.04'
+    timeout-minutes: 70
+    steps:
+    - name: 'preparations: Harden Runner'
+      uses: step-security/harden-runner@17d0e2bd7d51742c71671bd19fa12bdc9d40a3d6 # v2.8.1
+      with:
+        egress-policy: audit
+
+    - name: 'preparations: Checkout repository'
+      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+    - name: 'prerequisites: Download/Pull resources'
+      shell: bash
+      working-directory: scripts
+      run: |
+        git config --global user.email "you@example.com"
+        git config --global user.name "Ubuntu Action Runnner"
+
+    - name: 'prerequisites: Download/Pull resources'
+      shell: bash
+      working-directory: scripts
+      run: ./01_pull_resources.sh
+
+    - name: 'prerequisites: Install prerequisites'
+      shell: bash
+      working-directory: scripts
+      run: ./02_install_prerequisites.sh ./raisr.tar.gz
+
+    - name: 'Build raisr and ffmpeg'
+      shell: bash
+      working-directory: scripts
+      run: ./03_build_raisr_ffmpeg.sh ./raisr/Video-Super-Resolution-Library
+
