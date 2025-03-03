@@ -31,6 +31,9 @@ pushd "${raisr_path}"
 sudo -E ./build.sh
 popd
 
+# cherry pick the fix to build with binutil >= 2.41. Remove it with later FFmpeg version
+git cherry-pick effadce6c756247ea8bae32dc13bb3e6f464f0eb
+
 # build ffmpeg
 pushd "${raisr_path}/../ffmpeg"
 cp "${raisr_path}/ffmpeg/vf_raisr.c" libavfilter/
